@@ -1,0 +1,132 @@
+LIBVHDIO
+
+libvhdio.so is an interposition library which presents VHDs as block
+devices. When pre-loaded with dynamically linked binaries, it
+intercepts all file-level IO calls (such as open, read, write, etc.)
+made against VHDs and interprets them as if they were against the VHD
+virtual block device. Thus, for example, when libvhdio intercepts a
+read() call at offset 0 of a VHD, it parses the VHD metadata, maps the
+offset into the virtual block device address space, and returns the
+data corresponding to byte 0 of the virtual block device. This
+essentially makes the VHD regular file appear as a 'mounted' block
+device, and it allows unmodified binaries (like dd, mkfs, etc.) to
+manipulate VHDs without knowing anything about the VHD file format.
+
+
+DETAILS
+
+During calls to open(), libvhdio inspects the file to be opened. If
+the given file is a VHD (i.e., it contains a valid VHD header and
+footer), libvhdio opens the file with libvhd::vhd_open(), saves the
+vhd_context_t in a private table, opens /dev/null to create a dummy
+file descriptor, maps the descriptor to the vhd_context_t, and returns
+the dummy descriptor to the caller. Any subsequent calls made against
+the dummy file descriptor will be intercepted and applied to the VHD.
+
+It is not safe to have multiple vhd_context_t objects opened for
+writing against the same VHD because each context keeps a private
+in-memory cache of metadata. For this reason libvhdio wraps each
+vhd_context_t in a vhd_object, which contains a reference count and
+the inode number of the underlying VHD file. When a call is made to
+open a VHD, libvhdio first searches its table of open vhd_objects for
+a context whose inode number matches that of the given file
+argument. If a match is found, libvhdio increments a reference count
+for the vhd_object, allocates a new vhd_fd_context and links it to the
+vhd_object, and returns the vhd_fd_context.
+
+Each vhd_fd_context maintains the seek offset for the file descriptor
+it represents. It also maintains a 'users' count. When a
+vhd_fd_context is dup()'ed, this 'users' count is incremented,
+allowing the same vhd_fd_context_t to be shared across all dup()'ed
+instances of a given file descriptor.
+
+libvhdio is able to expose individual primary partitions within a
+VHD. This is accomplished by a naming convention. When opening a VHD
+file, libvhdio checks the path argument provided to open; if the path
+names a symbolic link whose name matches "*.vhd[1-4]", and the file
+referenced by the link is indeed a VHD, libvhdio will parse the
+partition table in the VHD to determine the logical offsets of the
+given partition. All subsequent read/write/seek/etc. calls will be
+made relative to the partition offset. This state is maintained in the
+vhd_partition structure, a simple wrapper of the vhd_object struct.
+
+A convenience script blktap.git:/part/vhdpartx is provided to
+facilitate the creation of the symbolic links used by
+libvhdio. vhdpartx is analogous to kpartx -- it scans the VHD
+partition table and creates or removes symlinks for each
+partition. 'vhdpartx -a /path/to/vhd' will create symlinks, while
+'vhdpartx -d /path/to/vhd' will remove them, and 'vhdpartx -l
+/path/to/vhd' will list all valid partitions.
+
+The full association of libvhdio data structures is:
+
+fd -> vhd_fd_context -> vhd_partition -> vhd_object -> vhd_context_t
+
+Multiple dummy fds may map to a single vhd_fd_context by virtue of
+calls to dup(), and multiple vhd_partition structs may link to a
+single vhd_object struct by virtue of multiple calls to open() of the
+same VHD file.
+
+
+CAVEATS
+
+As with all LD_PRELOAD libraries, libvhdio can only intercept calls to
+dynamically linked library functions. Thus libvhdio will not work with
+statically linked binaries.
+
+Also, while effort has been made to interpose on all relevant IO
+functions (in all their various incarnations), your mileage may vary.
+
+Finally, crypto support is not currently provided.
+
+**DO NOT USE libvhdio WITH ENCRYPTED VHDs!**
+
+
+DEBUGGING
+
+There are a few environment variables which can be set to increase the
+verbosity of libvhdio:
+
+  LIBVHD_IO_DEBUG: if set, libvhdio will log every function it
+    intercepts and will provide mapping details between dummy fds and
+    vhd_context_t objects. This makes it easy to verify that IO
+    operations against VHDs are being successfully intercepted.
+
+  LIBVHD_IO_DUMP: if set, libvhdio will log hex dumps of all data
+    written to and read from vhd_context_t objects.
+
+  LIBVHD_IO_TEST: if set, libvhdio will install a signal handler which
+    will cause libvhdio to snapshot any given VHDs on the reception of
+    SIGCONT. The intention is to facilitate testing libvhdio on
+    arbitrary VHD chain configurations by performing a test while
+    repeatedly pausing and continuing it to increase the VHD chain
+    length. See test/test-snapshot.c.
+
+
+EXAMPLES
+
+Create a raw image of a VHD's contents:
+
+  LD_PRELOAD=./libvhdio.so dd if=file.vhd of=file.raw
+
+Create a sparse raw image of a VHD's contents:
+
+  LD_PRELOAD=./libvhdio.so dd if=file.vhd | \
+    cp --sparse=always /proc/self/fd/0 file.raw
+
+Inspect a VHD's partition table:
+
+  LD_PRELOAD=./libvhdio.so fdisk -l file.vhd
+
+Format the first partition of a VHD (assuming the partition exists):
+
+  vhdpartx -a file.vhd
+  LD_PRELOAD=./libvhdio.so mkfs.ext3 file.vhd1
+  vhdpartx -d file.vhd
+
+List the contents of the NTFS file system on the second partition of a
+VHD:
+
+  vhdpartx -a file.vhd
+  LD_PRELOAD=./libvhdio.so ntfsls file.vhd2
+  vhdpartx -d file.vhd

@@ -1,0 +1,4 @@
+CONFIG_IA64 := y
+CONFIG_IA64_$(BLKTAP_OS) := y
+
+LIBDIR := lib

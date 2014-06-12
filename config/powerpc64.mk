@@ -1,0 +1,4 @@
+CONFIG_POWERPC := y
+CONFIG_POWERPC_$(BLKTAP_OS) := y
+
+LIBDIR := lib
