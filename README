@@ -1,3 +1,23 @@
+OpenXT blktap2 Repository
+================================
+
+OpenXT has an old version (fork really) of the original blktap2 project from
+XenServer circa 2010. It was updated numerous times with back ports from the
+XenServer project. In addition to the base blktap2 project OpenXT (by way of
+work done on XenClient) extends the base project with the following:
+
+ 1. The current VHD encryption feature based on OpenSSL and the keyhash support
+    found in the VHD meta structures.
+ 2. ICBINN supprt for VHD management by Synchronizer XT backend.
+ 3. Miscellaneous fixes and attempts at fixes (many of which are not upstream).
+ 4. VHD management support for the defunct Transmitter backend.
+
+This repository is considered deprecated and will be replaced by rebasing 1,
+2 and some of 3 on an upstream version of blktap2. This will then be replaced
+by rebasing on blktap3.
+
+What follows below is the original documentation for blktap2...
+
 Blktap Userspace Tools + Library
 ================================
 
